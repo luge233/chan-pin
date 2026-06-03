@@ -1,0 +1,1493 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>评论区运营面板</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  .tab-btn.active { border-bottom: 3px solid #3b82f6; color: #3b82f6; font-weight: 600; }
+  .hot-row { background: linear-gradient(90deg, #fffbeb 0%, #fff 30%); border-left: 3px solid #f59e0b; }
+  .must-reply-row { border-left: 3px solid #ef4444; }
+  .delete-row { background: #fef2f2; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 9999px; font-size: 12px; font-weight: 500; }
+  .badge-hot { background: #fef3c7; color: #92400e; }
+  .badge-must { background: #fee2e2; color: #991b1b; }
+  .badge-selective { background: #dbeafe; color: #1e40af; }
+  .badge-delete { background: #fecaca; color: #7f1d1d; }
+  .badge-none { background: #f3f4f6; color: #6b7280; }
+  .toast { position: fixed; top: 20px; right: 20px; z-index: 9999; padding: 12px 24px; border-radius: 8px; background: #10b981; color: white; font-weight: 500; opacity: 0; transition: opacity 0.3s; }
+  .toast.show { opacity: 1; }
+  .stat-card { transition: transform 0.15s; }
+  .stat-card:hover { transform: translateY(-2px); }
+  table th { position: sticky; top: 0; z-index: 10; }
+  .edit-select { border: 1px solid #d1d5db; border-radius: 4px; padding: 2px 4px; font-size: 13px; cursor: pointer; background: white; }
+  .edit-select:hover { border-color: #3b82f6; }
+  .checklist-item.done .check-text { opacity: 0.5; text-decoration: line-through; }
+  .sop-item { transition: all 0.15s; }
+  .sop-item:hover { transform: translateY(-1px); box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+  .sop-item.checked .sop-text { text-decoration: line-through; opacity: 0.5; }
+  .sop-action-btn { font-size: 12px; padding: 4px 12px; border-radius: 6px; white-space: nowrap; cursor: pointer; }
+  .modal-overlay { background: rgba(0,0,0,0.5); }
+  .mapping-row:nth-child(even) { background: #f9fafb; }
+</style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+
+<div id="toast" class="toast"></div>
+
+<!-- Header -->
+<header class="bg-white shadow-sm border-b border-gray-200">
+  <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <span class="text-2xl">🔥</span>
+      <h1 class="text-xl font-bold text-gray-800">评论区运营面板</h1>
+      <span class="text-sm text-gray-400 ml-2">论文降AI热评库</span>
+    </div>
+    <div class="flex items-center gap-2">
+      <label class="cursor-pointer px-3 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 transition">
+        📂 导入JSON
+        <input type="file" id="importFile" accept=".json" class="hidden">
+      </label>
+      <button onclick="openPasteImport()" class="px-3 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700 transition">📋 粘贴导入</button>
+      <button onclick="openQuickEntry()" class="px-3 py-2 bg-purple-600 text-white rounded-lg text-sm hover:bg-purple-700 transition">📝 快速录入</button>
+      <button onclick="confirmReset()" class="px-3 py-2 bg-red-500 text-white rounded-lg text-sm hover:bg-red-600 transition">🗑 重置</button>
+      <button onclick="exportCSVDaily()" class="px-3 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm hover:bg-gray-200 transition">📊 导出日报</button>
+      <button onclick="recalcHot()" class="px-3 py-2 bg-amber-500 text-white rounded-lg text-sm hover:bg-amber-600 transition">🔥 重算热评</button>
+      <button onclick="analyzeAll()" class="px-3 py-2 bg-indigo-500 text-white rounded-lg text-sm hover:bg-indigo-600 transition">🤖 智能分析</button>
+    </div>
+  </div>
+  <!-- Tabs -->
+  <div class="max-w-7xl mx-auto px-4 flex gap-1">
+    <button class="tab-btn active px-4 py-2 text-sm" onclick="switchTab('dashboard', this)">📊 仪表盘</button>
+    <button class="tab-btn px-4 py-2 text-sm text-gray-500" onclick="switchTab('list', this)">📋 评论列表</button>
+    <button class="tab-btn px-4 py-2 text-sm text-gray-500" onclick="switchTab('hot', this)">🔥 热评识别</button>
+    <button class="tab-btn px-4 py-2 text-sm text-gray-500" onclick="switchTab('sop', this)">📐 SOP执行</button>
+  </div>
+</header>
+
+<!-- Dashboard Tab -->
+<main id="tab-dashboard" class="max-w-7xl mx-auto px-4 py-6">
+  <!-- Empty state welcome card -->
+  <div id="emptyWelcomeCard" class="text-center py-12 hidden">
+    <span class="text-4xl">📋</span>
+    <h3 class="text-lg font-semibold text-gray-600 mt-3">还没有评论数据</h3>
+    <p class="text-sm text-gray-400 mt-1">导入或录入评论数据以开始运营</p>
+    <div class="flex gap-3 justify-center mt-4">
+      <button onclick="document.getElementById('importFile').click()" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">📂 导入JSON</button>
+      <button onclick="openPasteImport()" class="px-4 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700">📋 粘贴导入</button>
+      <button onclick="openQuickEntry()" class="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm hover:bg-purple-700">📝 快速录入</button>
+    </div>
+  </div>
+  <!-- Normal dashboard content -->
+  <div id="dashboardContent">
+  <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
+    <div class="stat-card bg-white rounded-xl shadow-sm p-4 border">
+      <div class="text-xs text-gray-400 mb-1">总评论数</div>
+      <div class="text-2xl font-bold text-gray-800" id="stat-total">0</div>
+    </div>
+    <div class="stat-card bg-white rounded-xl shadow-sm p-4 border">
+      <div class="text-xs text-gray-400 mb-1">热评数</div>
+      <div class="text-2xl font-bold text-amber-600" id="stat-hot">0</div>
+    </div>
+    <div class="stat-card bg-white rounded-xl shadow-sm p-4 border">
+      <div class="text-xs text-gray-400 mb-1">热评率</div>
+      <div class="text-2xl font-bold text-amber-500" id="stat-hotrate">0%</div>
+    </div>
+    <div class="stat-card bg-white rounded-xl shadow-sm p-4 border">
+      <div class="text-xs text-gray-400 mb-1">必须回复</div>
+      <div class="text-2xl font-bold text-red-600" id="stat-mustreply">0</div>
+    </div>
+    <div class="stat-card bg-white rounded-xl shadow-sm p-4 border">
+      <div class="text-xs text-gray-400 mb-1">建议删除</div>
+      <div class="text-2xl font-bold text-pink-600" id="stat-delete">0</div>
+    </div>
+    <div class="stat-card bg-white rounded-xl shadow-sm p-4 border">
+      <div class="text-xs text-gray-400 mb-1">效果反馈热评率</div>
+      <div class="text-2xl font-bold text-green-600" id="stat-effhot">0%</div>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+    <div class="bg-white rounded-xl shadow-sm p-4">
+      <h3 class="text-sm font-semibold text-gray-600 mb-3">评论内容类型分布</h3>
+      <canvas id="chartContentType" height="200"></canvas>
+    </div>
+    <div class="bg-white rounded-xl shadow-sm p-4">
+      <h3 class="text-sm font-semibold text-gray-600 mb-3">回复处理状态分布</h3>
+      <canvas id="chartReplyStatus" height="200"></canvas>
+    </div>
+    <div class="bg-white rounded-xl shadow-sm p-4">
+      <h3 class="text-sm font-semibold text-gray-600 mb-3">评论顺序角色分布</h3>
+      <canvas id="chartRole" height="200"></canvas>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+    <div class="bg-white rounded-xl shadow-sm p-4">
+      <h3 class="text-sm font-semibold text-gray-600 mb-3">地区分布 TOP10</h3>
+      <canvas id="chartRegion" height="200"></canvas>
+    </div>
+    <div class="bg-white rounded-xl shadow-sm p-4">
+      <h3 class="text-sm font-semibold text-gray-600 mb-3">热度分 vs 点赞数</h3>
+      <canvas id="chartScatter" height="200"></canvas>
+    </div>
+  </div>
+
+  <!-- Daily Checklist -->
+  <div class="bg-white rounded-xl shadow-sm p-4">
+    <div class="flex items-center justify-between mb-3">
+      <h3 class="text-sm font-semibold text-gray-600">✅ 每日必做 Checklist</h3>
+      <button onclick="switchTabByName('sop')" class="text-xs text-blue-500 hover:text-blue-700">查看完整SOP →</button>
+    </div>
+    <div id="dailyChecklist" class="space-y-2"></div>
+  </div>
+
+  <div class="bg-white rounded-xl shadow-sm p-4 mt-4">
+    <h3 class="text-sm font-semibold text-gray-600 mb-3">📐 关键数据基准</h3>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+      <div class="p-3 bg-gray-50 rounded-lg">
+        <div class="text-xs text-gray-400">热度分中位数</div>
+        <div class="text-lg font-bold">7.55</div>
+        <div class="text-xs text-green-500">优秀值 &gt;10</div>
+      </div>
+      <div class="p-3 bg-gray-50 rounded-lg">
+        <div class="text-xs text-gray-400">点赞数中位数</div>
+        <div class="text-lg font-bold">1</div>
+        <div class="text-xs text-green-500">优秀值 &gt;3</div>
+      </div>
+      <div class="p-3 bg-gray-50 rounded-lg">
+        <div class="text-xs text-gray-400">点赞P90阈值</div>
+        <div class="text-lg font-bold" id="bench-likes-p90">-</div>
+        <div class="text-xs text-amber-500">热评门槛</div>
+      </div>
+      <div class="p-3 bg-gray-50 rounded-lg">
+        <div class="text-xs text-gray-400">热度分P90阈值</div>
+        <div class="text-lg font-bold" id="bench-score-p90">-</div>
+        <div class="text-xs text-amber-500">热评门槛</div>
+      </div>
+    </div>
+  </div>
+  </div>
+</main>
+
+<!-- Comment List Tab -->
+<main id="tab-list" class="max-w-full mx-auto px-4 py-6 hidden">
+  <div class="bg-white rounded-xl shadow-sm p-4 mb-4">
+    <div class="flex flex-wrap gap-3 items-center">
+      <select id="filterContentType" onchange="applyFilters()" class="edit-select">
+        <option value="">全部内容类型</option>
+        <option value="吸引点击类">吸引点击类</option>
+        <option value="询问类">询问类</option>
+        <option value="效果反馈类">效果反馈类</option>
+      </select>
+      <select id="filterRole" onchange="applyFilters()" class="edit-select">
+        <option value="">全部角色</option>
+        <option value="首评提问">首评提问</option>
+        <option value="第二三条产品讨论">第二三条产品讨论</option>
+        <option value="第四五条痛点/复购讨论">四五条痛点复购</option>
+        <option value="普通评论">普通评论</option>
+        <option value="非引导评论">非引导评论</option>
+      </select>
+      <select id="filterReplyStatus" onchange="applyFilters()" class="edit-select">
+        <option value="">全部回复状态</option>
+        <option value="必须回复">必须回复</option>
+        <option value="选择性回复">选择性回复</option>
+        <option value="无需回复">无需回复</option>
+        <option value="建议删除">建议删除</option>
+      </select>
+      <select id="filterIsHot" onchange="applyFilters()" class="edit-select">
+        <option value="">热评/非热评</option>
+        <option value="true">仅热评</option>
+        <option value="false">仅非热评</option>
+      </select>
+      <select id="filterCommentType" onchange="applyFilters()" class="edit-select">
+        <option value="">主/子评论</option>
+        <option value="主评论">主评论</option>
+        <option value="子评论">子评论</option>
+      </select>
+      <input type="text" id="filterSearch" placeholder="搜索评论内容/评论人..." oninput="applyFilters()" class="border rounded-lg px-3 py-1.5 text-sm w-48">
+      <select id="sortBy" onchange="applyFilters()" class="edit-select">
+        <option value="hotScore-desc">热度分 ↓</option>
+        <option value="hotScore-asc">热度分 ↑</option>
+        <option value="likes-desc">点赞数 ↓</option>
+        <option value="likes-asc">点赞数 ↑</option>
+        <option value="publishTime-desc">发布时间 ↓</option>
+        <option value="publishTime-asc">发布时间 ↑</option>
+      </select>
+      <button onclick="resetFilters()" class="text-xs text-gray-400 hover:text-gray-600">重置</button>
+      <span class="text-xs text-gray-400 ml-2" id="filterCount">共 0 条</span>
+    </div>
+    <div class="flex flex-wrap gap-2 mt-3">
+      <button onclick="quickView('mustReply')" class="text-xs px-3 py-1 rounded-full bg-red-50 text-red-700 hover:bg-red-100">⚠ 必须回复 (<span id="qv-must">0</span>)</button>
+      <button onclick="quickView('suggestDelete')" class="text-xs px-3 py-1 rounded-full bg-pink-50 text-pink-700 hover:bg-pink-100">⊘ 建议删除 (<span id="qv-delete">0</span>)</button>
+      <button onclick="quickView('hot')" class="text-xs px-3 py-1 rounded-full bg-amber-50 text-amber-700 hover:bg-amber-100">🔥 热评 (<span id="qv-hot">0</span>)</button>
+      <button onclick="quickView('firstComment')" class="text-xs px-3 py-1 rounded-full bg-blue-50 text-blue-700 hover:bg-blue-100">💬 首评提问 (<span id="qv-first">0</span>)</button>
+    </div>
+  </div>
+
+  <div class="bg-white rounded-xl shadow-sm p-3 mb-4 hidden" id="batchBar">
+    <div class="flex items-center gap-3">
+      <span class="text-sm text-gray-600">已选 <strong id="batchCount">0</strong> 条</span>
+      <span class="text-gray-300">|</span>
+      <span class="text-xs text-gray-500">批量设置回复状态:</span>
+      <select id="batchReplyStatus" class="edit-select text-xs">
+        <option value="">选择状态</option>
+        <option value="必须回复">必须回复</option>
+        <option value="选择性回复">选择性回复</option>
+        <option value="无需回复">无需回复</option>
+        <option value="建议删除">建议删除</option>
+      </select>
+      <button onclick="batchUpdate()" class="text-xs px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600">应用</button>
+      <button onclick="clearSelection()" class="text-xs px-3 py-1 text-gray-500 hover:text-gray-700">取消选择</button>
+    </div>
+  </div>
+
+  <div class="bg-white rounded-xl shadow-sm overflow-hidden">
+    <div class="overflow-x-auto" style="max-height:70vh">
+      <table class="w-full text-sm">
+        <thead class="bg-gray-50">
+          <tr>
+            <th class="px-3 py-2 text-left text-xs text-gray-500 w-8"><input type="checkbox" id="selectAll" onchange="toggleSelectAll()"></th>
+            <th class="px-3 py-2 text-left text-xs text-gray-500 w-10">#</th>
+            <th class="px-3 py-2 text-left text-xs text-gray-500" style="min-width:220px">评论内容</th>
+            <th class="px-3 py-2 text-left text-xs text-gray-500 w-24">评论人</th>
+            <th class="px-3 py-2 text-left text-xs text-gray-500 w-28">内容类型</th>
+            <th class="px-3 py-2 text-left text-xs text-gray-500 w-28">角色</th>
+            <th class="px-3 py-2 text-left text-xs text-gray-500 w-28">回复状态</th>
+            <th class="px-3 py-2 text-left text-xs text-gray-500 w-10">🔥</th>
+            <th class="px-3 py-2 text-left text-xs text-gray-500 w-10">👍</th>
+            <th class="px-3 py-2 text-left text-xs text-gray-500 w-12">热度</th>
+            <th class="px-3 py-2 text-left text-xs text-gray-500 w-10">排名</th>
+            <th class="px-3 py-2 text-left text-xs text-gray-500 w-10">地区</th>
+          </tr>
+        </thead>
+        <tbody id="commentTableBody"></tbody>
+      </table>
+    </div>
+  </div>
+  <div class="flex justify-center py-4" id="pagination"></div>
+</main>
+
+<!-- Hot Comment Detection Tab -->
+<main id="tab-hot" class="max-w-7xl mx-auto px-4 py-6 hidden">
+  <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+    <div class="bg-white rounded-xl shadow-sm p-4 border-l-4 border-amber-400">
+      <h3 class="text-sm font-semibold text-gray-700 mb-2">标准一：点赞数全局前10%</h3>
+      <div class="text-xs text-gray-400 mb-1">阈值（P90）</div>
+      <div class="text-3xl font-bold text-amber-600" id="hotThresholdLikes">-</div>
+      <div class="text-xs text-gray-400 mt-2">满足条件: <strong id="hotCountLikes">-</strong> 条</div>
+    </div>
+    <div class="bg-white rounded-xl shadow-sm p-4 border-l-4 border-orange-500">
+      <h3 class="text-sm font-semibold text-gray-700 mb-2">标准二：热度分全局前10%</h3>
+      <div class="text-xs text-gray-400 mb-1">阈值（P90）</div>
+      <div class="text-3xl font-bold text-orange-600" id="hotThresholdScore">-</div>
+      <div class="text-xs text-gray-400 mt-2">满足条件: <strong id="hotCountScore">-</strong> 条</div>
+    </div>
+    <div class="bg-white rounded-xl shadow-sm p-4 border-l-4 border-red-500">
+      <h3 class="text-sm font-semibold text-gray-700 mb-2">标准三：笔记内热度排名前3</h3>
+      <div class="text-xs text-gray-400 mb-1">按笔记分组</div>
+      <div class="text-3xl font-bold text-red-600" id="hotCountRank">-</div>
+      <div class="text-xs text-gray-400 mt-2">涉及笔记数: <strong id="hotNoteCount">-</strong></div>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+    <div class="bg-white rounded-xl shadow-sm p-4">
+      <h3 class="text-sm font-semibold text-gray-600 mb-3">点赞数分布直方图</h3>
+      <canvas id="chartLikesDist" height="200"></canvas>
+    </div>
+    <div class="bg-white rounded-xl shadow-sm p-4">
+      <h3 class="text-sm font-semibold text-gray-600 mb-3">热度分分布直方图</h3>
+      <canvas id="chartScoreDist" height="200"></canvas>
+    </div>
+  </div>
+
+  <div class="bg-white rounded-xl shadow-sm p-4">
+    <h3 class="text-sm font-semibold text-gray-600 mb-3">各笔记热度TOP3</h3>
+    <div id="noteTopList" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3"></div>
+  </div>
+</main>
+
+	<!-- SOP Execution Tab -->
+	<main id="tab-sop" class="max-w-4xl mx-auto px-4 py-6 hidden">
+	  <div class="bg-white rounded-xl shadow-sm p-5 mb-4">
+	    <div class="flex items-center justify-between mb-3 cursor-pointer" onclick="toggleSection('daily')">
+	      <h2 class="text-lg font-bold text-gray-800">📅 每日必做</h2>
+	      <div class="flex items-center gap-2">
+	        <span id="dailyProgress" class="text-sm text-gray-500">0/4</span>
+	        <div class="w-32 h-2 bg-gray-200 rounded-full overflow-hidden">
+	          <div id="dailyProgressBar" class="h-full bg-blue-500 rounded-full transition-all" style="width:0%"></div>
+	        </div>
+	        <span id="dailyChevron" class="text-gray-400 text-xs">▼</span>
+	      </div>
+	    </div>
+	    <div id="sopDaily" class="space-y-3"></div>
+	  </div>
+
+	  <div class="bg-white rounded-xl shadow-sm p-5 mb-4">
+	    <div class="flex items-center justify-between mb-3 cursor-pointer" onclick="toggleSection('weekly')">
+	      <h2 class="text-lg font-bold text-gray-800">📆 每周必做</h2>
+	      <div class="flex items-center gap-2">
+	        <span id="weeklyProgress" class="text-sm text-gray-500">0/5</span>
+	        <div class="w-32 h-2 bg-gray-200 rounded-full overflow-hidden">
+	          <div id="weeklyProgressBar" class="h-full bg-amber-500 rounded-full transition-all" style="width:0%"></div>
+	        </div>
+	        <span id="weeklyChevron" class="text-gray-400 text-xs">▼</span>
+	      </div>
+	    </div>
+	    <div id="sopWeekly" class="space-y-3"></div>
+	  </div>
+
+	  <div class="bg-white rounded-xl shadow-sm p-5 mb-4">
+	    <div class="flex items-center justify-between mb-3 cursor-pointer" onclick="toggleSection('monthly')">
+	      <h2 class="text-lg font-bold text-gray-800">📊 月度必做</h2>
+	      <div class="flex items-center gap-2">
+	        <span id="monthlyProgress" class="text-sm text-gray-500">0/4</span>
+	        <div class="w-32 h-2 bg-gray-200 rounded-full overflow-hidden">
+	          <div id="monthlyProgressBar" class="h-full bg-green-500 rounded-full transition-all" style="width:0%"></div>
+	        </div>
+	        <span id="monthlyChevron" class="text-gray-400 text-xs">▼</span>
+	      </div>
+	    </div>
+	    <div id="sopMonthly" class="space-y-3"></div>
+	  </div>
+
+	  <div class="bg-amber-50 rounded-xl p-4 text-sm text-amber-800">
+	    <p class="font-semibold mb-1">💡 SOP执行提示</p>
+	    <p>每项前的勾选状态会保存在浏览器中。点击快捷操作按钮可直接跳转到对应功能。每日清单建议每个工作日开始时完成，每周清单建议每周一执行，月度清单建议每月1日完成。</p>
+	  </div>
+	</main>
+
+	<!-- Reset Confirmation Modal -->
+	<div id="resetModal" class="modal-overlay fixed inset-0 z-50 hidden flex items-center justify-center">
+	  <div class="bg-white rounded-xl p-6 max-w-md w-full mx-4 shadow-xl">
+	    <h3 class="text-lg font-bold text-gray-800 mb-2">确认重置数据</h3>
+	    <p class="text-sm text-gray-600 mb-4">此操作将清除当前所有评论数据及本地编辑记录，不可恢复。确定要继续吗？</p>
+	    <div class="flex gap-3 justify-end">
+	      <button onclick="closeResetModal()" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm hover:bg-gray-200">取消</button>
+	      <button onclick="doReset()" class="px-4 py-2 bg-red-500 text-white rounded-lg text-sm hover:bg-red-600">确认重置</button>
+	    </div>
+	  </div>
+	</div>
+
+	<!-- Paste Import Modal -->
+	<div id="pasteImportModal" class="modal-overlay fixed inset-0 z-50 hidden flex items-center justify-center">
+	  <div class="bg-white rounded-xl p-6 max-w-4xl w-full mx-4 shadow-xl max-h-[90vh] overflow-y-auto">
+	    <h3 class="text-lg font-bold text-gray-800 mb-2">📋 从表格粘贴导入</h3>
+	    <p class="text-sm text-gray-500 mb-3">从 Excel / 飞书表格复制数据后粘贴到下方。第一行应为列标题。支持 Tab 分隔和逗号分隔。</p>
+	    <textarea id="pasteInput" class="w-full border rounded-lg p-3 text-sm font-mono h-48 resize-y focus:ring-2 focus:ring-blue-300 focus:border-blue-400" placeholder="在此粘贴表格数据...&#10;例：从飞书/Excel中选中数据区域，Ctrl+C复制，然后Ctrl+V粘贴到这里"></textarea>
+	    <div class="flex gap-3 mt-3">
+	      <button onclick="parsePastedData()" class="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">解析数据</button>
+	      <button onclick="closePasteImport()" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm hover:bg-gray-200">取消</button>
+	    </div>
+	    <div id="pasteMappingPreview" class="hidden mt-4">
+	      <h4 class="text-sm font-semibold text-gray-700 mb-2">🔍 列映射预览</h4>
+	      <p class="text-xs text-gray-400 mb-2">检测到的列映射如下，可手动调整未识别的列：</p>
+	      <div id="mappingTable" class="text-xs overflow-x-auto"></div>
+	      <h4 class="text-sm font-semibold text-gray-700 mt-4 mb-2">📊 数据预览（前5条）</h4>
+	      <div id="dataPreview" class="text-xs overflow-x-auto"></div>
+	      <div class="flex gap-3 mt-4 items-center">
+	        <span id="parsedCount" class="text-sm text-gray-600 font-semibold"></span>
+	        <button onclick="confirmPasteImport()" class="px-4 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700">确认导入</button>
+	        <button onclick="closePasteImport()" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm hover:bg-gray-200">取消</button>
+	      </div>
+	    </div>
+	  </div>
+	</div>
+
+<!-- Quick Entry Modal -->
+<div id="quickEntryModal" class="modal-overlay fixed inset-0 z-50 hidden flex items-center justify-center">
+  <div class="bg-white rounded-xl p-6 max-w-3xl w-full mx-4 shadow-xl max-h-[90vh] overflow-y-auto">
+    <h3 class="text-lg font-bold text-gray-800 mb-2">📝 快速录入评论</h3>
+    <p class="text-sm text-gray-500 mb-3">从小红书评论区复制评论文本粘贴到下方。支持多条换行分隔、用户名冒号格式、点赞数。</p>
+    <textarea id="quickEntryInput" class="w-full border rounded-lg p-3 text-sm h-40 resize-y focus:ring-2 focus:ring-purple-300 focus:border-purple-400" placeholder="在此粘贴评论文本...&#10;例1：小明：这个软件太好用了&#10;例2：这个软件太好用了 👍12&#10;例3：小红：降重效果很好 👍25&#10;例4：直接粘贴纯评论内容即可"></textarea>
+    <div class="flex gap-3 mt-3">
+      <button onclick="parseQuickEntry()" class="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm hover:bg-purple-700">解析预览</button>
+      <button onclick="closeQuickEntry()" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm hover:bg-gray-200">取消</button>
+    </div>
+    <div id="quickEntryPreview" class="hidden mt-4">
+      <h4 class="text-sm font-semibold text-gray-700 mb-2">📊 解析结果预览</h4>
+      <p class="text-xs text-gray-400 mb-2">共解析 <span id="quickEntryCount">0</span> 条评论记录</p>
+      <div class="overflow-x-auto max-h-64 border rounded-lg">
+        <table class="w-full text-xs">
+          <thead class="bg-gray-50 sticky top-0">
+            <tr>
+              <th class="px-2 py-1 text-left border">#</th>
+              <th class="px-2 py-1 text-left border">评论人</th>
+              <th class="px-2 py-1 text-left border" style="min-width:180px">评论内容</th>
+              <th class="px-2 py-1 text-center border w-12">👍</th>
+              <th class="px-2 py-1 text-left border w-24">内容类型</th>
+              <th class="px-2 py-1 text-left border w-24">回复状态</th>
+            </tr>
+          </thead>
+          <tbody id="quickEntryTableBody"></tbody>
+        </table>
+      </div>
+      <div class="flex gap-3 mt-4 items-center">
+        <span class="text-xs text-gray-400">💡 可在上方表格中修改内容类型和回复状态</span>
+        <button onclick="confirmQuickEntry()" class="px-4 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700">确认追加</button>
+        <button onclick="closeQuickEntry()" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm hover:bg-gray-200">取消</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ======= DATA (loaded from external file, fallback to inline) =======
+var records = [];
+var filtered = [];
+var currentPage = 1;
+var PAGE_SIZE = 50;
+var selectedIds = new Set();
+var charts = {};
+var pendingQuickRecords = [];
+
+// Load data - use script tag injection for reliable global variable access
+function loadDataScript() {
+  return new Promise(function(resolve, reject) {
+    var script = document.createElement('script');
+    script.src = 'app_data.js';
+    script.onload = function() {
+      if (typeof RAW_DATA !== 'undefined' && RAW_DATA && RAW_DATA.length > 0) {
+        resolve(RAW_DATA);
+      } else {
+        reject(new Error('RAW_DATA not found or empty'));
+      }
+    };
+    script.onerror = function() { reject(new Error('Failed to load app_data.js')); };
+    document.head.appendChild(script);
+  });
+}
+
+// Bootstrap: check localStorage first, fallback to app_data.js
+(function bootstrapData() {
+  var saved = localStorage.getItem('hcOps_data');
+  if (saved) {
+    try {
+      records = JSON.parse(saved);
+      init();
+      return;
+    } catch(e) {
+      localStorage.removeItem('hcOps_data');
+    }
+  }
+  // Start empty — users import via header buttons
+  records = [];
+  init();
+})();
+
+function init() {
+  loadFromStorage();
+  applyFilters();
+  renderDashboard();
+  renderHotDetection();
+  initChecklist();
+  document.getElementById('importFile').addEventListener('change', handleImport);
+}
+
+function loadFromStorage() {
+  try {
+    var saved = localStorage.getItem('hcOps_edits');
+    if (saved) {
+      JSON.parse(saved).forEach(function(e) {
+        var r = records.find(function(x) { return x.uuid === e.uuid; });
+        if (r) r[e.field] = e.value;
+      });
+    }
+  } catch(e) {}
+}
+
+function saveEdit(uuid, field, value) {
+  var edits = JSON.parse(localStorage.getItem('hcOps_edits') || '[]');
+  edits.push({uuid: uuid, field: field, value: value});
+  localStorage.setItem('hcOps_edits', JSON.stringify(edits));
+}
+
+// ======= TAB SWITCHING =======
+function switchTab(tab, btn) {
+  document.querySelectorAll('[id^="tab-"]').forEach(function(el) { el.classList.add('hidden'); });
+  document.getElementById('tab-' + tab).classList.remove('hidden');
+  document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); b.classList.add('text-gray-500'); });
+  btn.classList.add('active');
+  btn.classList.remove('text-gray-500');
+  if (tab === 'dashboard') renderDashboard();
+  if (tab === 'hot') renderHotDetection();
+  if (tab === 'sop') renderSOPChecklist();
+}
+
+// ======= DASHBOARD =======
+function renderDashboard() {
+  var welcomeCard = document.getElementById('emptyWelcomeCard');
+  var content = document.getElementById('dashboardContent');
+  if (records.length === 0) {
+    if (welcomeCard) welcomeCard.classList.remove('hidden');
+    if (content) content.classList.add('hidden');
+    return;
+  }
+  if (welcomeCard) welcomeCard.classList.add('hidden');
+  if (content) content.classList.remove('hidden');
+
+  var total = records.length;
+  var hotCount = records.filter(function(r){return r.isHot==='true'}).length;
+  var mustReplyCount = records.filter(function(r){return r.replyStatus==='必须回复'}).length;
+  var deleteCount = records.filter(function(r){return r.replyStatus==='建议删除'}).length;
+  var effTotal = records.filter(function(r){return r.contentType==='效果反馈类'}).length;
+  var effHot = records.filter(function(r){return r.contentType==='效果反馈类' && r.isHot==='true'}).length;
+
+  document.getElementById('stat-total').textContent = total;
+  document.getElementById('stat-hot').textContent = hotCount;
+  document.getElementById('stat-hotrate').textContent = total > 0 ? (hotCount/total*100).toFixed(1)+'%' : '-';
+  document.getElementById('stat-mustreply').textContent = mustReplyCount;
+  document.getElementById('stat-delete').textContent = deleteCount;
+  document.getElementById('stat-effhot').textContent = effTotal ? (effHot/effTotal*100).toFixed(1)+'%' : '-';
+
+  var likesSorted = records.map(function(r){return r.likes||0}).filter(function(v){return v>0}).sort(function(a,b){return a-b});
+  var scoresSorted = records.map(function(r){return r.hotScore||0}).filter(function(v){return v>0}).sort(function(a,b){return a-b});
+  var p90l = likesSorted[Math.floor(likesSorted.length*0.9)] || 0;
+  var p90s = scoresSorted[Math.floor(scoresSorted.length*0.9)] || 0;
+  document.getElementById('bench-likes-p90').textContent = p90l;
+  document.getElementById('bench-score-p90').textContent = p90s.toFixed(2);
+
+  makeChart('chartContentType', 'doughnut', {
+    labels: ['吸引点击类','询问类','效果反馈类'],
+    datasets:[{data:[
+      records.filter(function(r){return r.contentType==='吸引点击类'}).length,
+      records.filter(function(r){return r.contentType==='询问类'}).length,
+      records.filter(function(r){return r.contentType==='效果反馈类'}).length
+    ],backgroundColor:['#3b82f6','#10b981','#f59e0b']}]
+  }, {plugins:{legend:{position:'bottom'}}});
+
+  makeChart('chartReplyStatus', 'doughnut', {
+    labels: ['必须回复','选择性回复','无需回复','建议删除'],
+    datasets:[{data:[
+      mustReplyCount,
+      records.filter(function(r){return r.replyStatus==='选择性回复'}).length,
+      records.filter(function(r){return r.replyStatus==='无需回复'}).length,
+      deleteCount
+    ],backgroundColor:['#ef4444','#3b82f6','#9ca3af','#ec4899']}]
+  }, {plugins:{legend:{position:'bottom'}}});
+
+  makeChart('chartRole', 'bar', {
+    labels: ['首评提问','第二三条','四五条痛点复购','普通评论','非引导'],
+    datasets:[{data:[
+      records.filter(function(r){return r.role==='首评提问'}).length,
+      records.filter(function(r){return r.role==='第二三条产品讨论'}).length,
+      records.filter(function(r){return r.role==='第四五条痛点/复购讨论'}).length,
+      records.filter(function(r){return r.role==='普通评论'}).length,
+      records.filter(function(r){return r.role==='非引导评论'}).length
+    ],backgroundColor:['#8b5cf6','#3b82f6','#06b6d4','#9ca3af','#ef4444']}]
+  }, {plugins:{legend:{display:false}},scales:{y:{beginAtZero:true}}});
+
+  var regionCounts = {};
+  records.forEach(function(r){if(r.region) regionCounts[r.region]=(regionCounts[r.region]||0)+1;});
+  var regionTop = Object.keys(regionCounts).map(function(k){return [k,regionCounts[k]]}).sort(function(a,b){return b[1]-a[1]}).slice(0,10);
+  makeChart('chartRegion', 'bar', {
+    labels: regionTop.map(function(r){return r[0]}),
+    datasets:[{data:regionTop.map(function(r){return r[1]}),backgroundColor:'#3b82f6'}]
+  }, {indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{beginAtZero:true}}});
+
+  var scatterData = records.slice(0,400).map(function(r){return {x:r.likes||0,y:r.hotScore||0}});
+  makeChart('chartScatter', 'scatter', {
+    datasets:[{data:scatterData,backgroundColor:'rgba(59,130,246,0.4)',pointRadius:3}]
+  }, {scales:{x:{title:{display:true,text:'点赞数'}},y:{title:{display:true,text:'热度分'}}}});
+
+  document.getElementById('qv-must').textContent = mustReplyCount;
+  document.getElementById('qv-delete').textContent = deleteCount;
+  document.getElementById('qv-hot').textContent = hotCount;
+  document.getElementById('qv-first').textContent = records.filter(function(r){return r.role==='首评提问'}).length;
+}
+
+function makeChart(id, type, data, options) {
+  var ctx = document.getElementById(id);
+  if (!ctx) return;
+  if (charts[id]) charts[id].destroy();
+  charts[id] = new Chart(ctx, {type: type, data: data, options: options || {}});
+}
+
+// ======= COMMENT LIST =======
+function applyFilters() {
+  var ct = document.getElementById('filterContentType').value;
+  var role = document.getElementById('filterRole').value;
+  var rs = document.getElementById('filterReplyStatus').value;
+  var hot = document.getElementById('filterIsHot').value;
+  var cType = document.getElementById('filterCommentType').value;
+  var search = document.getElementById('filterSearch').value.toLowerCase();
+  var sortVal = document.getElementById('sortBy').value;
+
+  filtered = records.filter(function(r) {
+    if (ct && r.contentType !== ct) return false;
+    if (role && r.role !== role) return false;
+    if (rs && r.replyStatus !== rs) return false;
+    if (hot && r.isHot !== hot) return false;
+    if (cType && r.commentType !== cType) return false;
+    if (search && (r.commentContent+r.commentAuthor).toLowerCase().indexOf(search) < 0) return false;
+    return true;
+  });
+
+  var parts = sortVal.split('-');
+  var sField = parts[0], sDir = parts[1];
+  filtered.sort(function(a,b){ var va=a[sField]||0, vb=b[sField]||0; return sDir==='desc'?vb-va:va-vb; });
+  document.getElementById('filterCount').textContent = '共 '+filtered.length+' 条';
+  currentPage = 1;
+  renderTable();
+}
+
+function resetFilters() {
+  ['filterContentType','filterRole','filterReplyStatus','filterIsHot','filterCommentType'].forEach(function(id){document.getElementById(id).value='';});
+  document.getElementById('filterSearch').value='';
+  document.getElementById('sortBy').value='hotScore-desc';
+  applyFilters();
+}
+
+function quickView(view) {
+  resetFilters();
+  if (view==='mustReply') document.getElementById('filterReplyStatus').value='必须回复';
+  if (view==='suggestDelete') document.getElementById('filterReplyStatus').value='建议删除';
+  if (view==='hot') document.getElementById('filterIsHot').value='true';
+  if (view==='firstComment') document.getElementById('filterRole').value='首评提问';
+  applyFilters();
+}
+
+function esc(s) { if (!s) return ''; return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+function renderTable() {
+  if (filtered.length === 0) {
+    document.getElementById('commentTableBody').innerHTML =
+      '<tr><td colspan="12" class="text-center py-12 text-gray-400">'
+      + (records.length === 0
+        ? '<span class="text-2xl">📋</span><br>暂无数据，请导入评论数据'
+        : '<span class="text-2xl">🔍</span><br>没有匹配的评论')
+      + '</td></tr>';
+    document.getElementById('pagination').innerHTML = '';
+    document.getElementById('filterCount').textContent = '共 0 条';
+    return;
+  }
+  var start = (currentPage-1)*PAGE_SIZE;
+  var page = filtered.slice(start, start+PAGE_SIZE);
+  var tbody = document.getElementById('commentTableBody');
+  var html = '';
+  page.forEach(function(r, i) {
+    var idx = start + i;
+    var isHot = r.isHot === 'true';
+    var isMust = r.replyStatus === '必须回复';
+    var isDel = r.replyStatus === '建议删除';
+    var rowClass = isMust ? 'must-reply-row' : isDel ? 'delete-row' : isHot ? 'hot-row' : '';
+    var chk = selectedIds.has(r.uuid) ? 'checked' : '';
+    var content = esc((r.commentContent||'').substring(0,55));
+    if ((r.commentContent||'').length > 55) content += '...';
+    var noteContent = esc((r.noteContent||'').substring(0,25));
+
+    var hotBadge = isHot ? '<span class="badge badge-hot">🔥热评</span>' : '';
+    var statusBadge = r.replyStatus==='必须回复' ? '<span class="badge badge-must">必须回复</span>'
+      : r.replyStatus==='选择性回复' ? '<span class="badge badge-selective">选择性</span>'
+      : r.replyStatus==='建议删除' ? '<span class="badge badge-delete">建议删除</span>'
+      : '<span class="badge badge-none">无需回复</span>';
+
+    html += '<tr class="'+rowClass+' hover:bg-blue-50 transition">'
+      +'<td class="px-3 py-2"><input type="checkbox" data-uuid="'+r.uuid+'" '+chk+' onchange="toggleSelect(this)"></td>'
+      +'<td class="px-3 py-2 text-xs text-gray-400">'+(idx+1)+'</td>'
+      +'<td class="px-3 py-2"><div class="text-sm">'+content+(r._autoAnalyzed==='true'?' <span class="badge" style="background:#e8f5e9;color:#2e7d32;font-size:10px">🤖自动</span>':'')+'</div><div class="text-xs text-gray-400 mt-1">#'+(r.noteSerial||'-')+' '+noteContent+'</div></td>'
+      +'<td class="px-3 py-2 text-xs truncate max-w-[100px]">'+esc((r.commentAuthor||'').substring(0,10))+'</td>'
+      +'<td class="px-3 py-2"><select class="edit-select text-xs" onchange="inlineEdit(this,\''+r.uuid+'\',\'contentType\')">'
+        +'<option value=""'+(r.contentType?'':' selected')+'>未分类</option>'
+        +'<option value="吸引点击类"'+(r.contentType==='吸引点击类'?' selected':'')+'>吸引点击类</option>'
+        +'<option value="询问类"'+(r.contentType==='询问类'?' selected':'')+'>询问类</option>'
+        +'<option value="效果反馈类"'+(r.contentType==='效果反馈类'?' selected':'')+'>效果反馈类</option>'
+      +'</select></td>'
+      +'<td class="px-3 py-2"><select class="edit-select text-xs" onchange="inlineEdit(this,\''+r.uuid+'\',\'role\')">'
+        +'<option value=""'+(r.role?'':' selected')+'>未分类</option>'
+        +'<option value="首评提问"'+(r.role==='首评提问'?' selected':'')+'>首评提问</option>'
+        +'<option value="第二三条产品讨论"'+(r.role==='第二三条产品讨论'?' selected':'')+'>第二三条</option>'
+        +'<option value="第四五条痛点/复购讨论"'+(r.role==='第四五条痛点/复购讨论'?' selected':'')+'>痛点复购</option>'
+        +'<option value="普通评论"'+(r.role==='普通评论'?' selected':'')+'>普通</option>'
+        +'<option value="非引导评论"'+(r.role==='非引导评论'?' selected':'')+'>非引导</option>'
+      +'</select></td>'
+      +'<td class="px-3 py-2"><select class="edit-select text-xs" onchange="inlineEdit(this,\''+r.uuid+'\',\'replyStatus\')">'
+        +'<option value="必须回复"'+(r.replyStatus==='必须回复'?' selected':'')+'>必须回复</option>'
+        +'<option value="选择性回复"'+(r.replyStatus==='选择性回复'?' selected':'')+'>选择性</option>'
+        +'<option value="无需回复"'+(r.replyStatus==='无需回复'?' selected':'')+'>无需回复</option>'
+        +'<option value="建议删除"'+(r.replyStatus==='建议删除'?' selected':'')+'>建议删除</option>'
+      +'</select></td>'
+      +'<td class="px-3 py-2 text-center">'+hotBadge+'</td>'
+      +'<td class="px-3 py-2 text-xs text-center">'+(r.likes||0)+'</td>'
+      +'<td class="px-3 py-2 text-xs text-center font-mono">'+(r.hotScore?r.hotScore.toFixed(1):'-')+'</td>'
+      +'<td class="px-3 py-2 text-xs text-center">#'+(r.noteRank||'-')+'</td>'
+      +'<td class="px-3 py-2 text-xs">'+esc(r.region||'-')+'</td>'
+      +'</tr>';
+  });
+  tbody.innerHTML = html;
+  renderPagination();
+  updateBatchBar();
+}
+
+function renderPagination() {
+  var total = filtered.length;
+  var totalPages = Math.ceil(total/PAGE_SIZE);
+  var div = document.getElementById('pagination');
+  if (totalPages<=1) { div.innerHTML=''; return; }
+  var html = '';
+  for (var i=1;i<=totalPages;i++) {
+    if (i===1||i===totalPages||Math.abs(i-currentPage)<=2) {
+      html += '<button onclick="goPage('+i+')" class="px-3 py-1 text-sm rounded '+(i===currentPage?'bg-blue-600 text-white':'bg-white text-gray-600 hover:bg-gray-100')+'">'+i+'</button>';
+    } else if (Math.abs(i-currentPage)===3) {
+      html += '<span class="text-gray-400">...</span>';
+    }
+  }
+  div.innerHTML = html;
+}
+
+function goPage(p) { currentPage=p; renderTable(); }
+
+function inlineEdit(sel, uuid, field) {
+  var r = records.find(function(x){return x.uuid===uuid;});
+  if (r) {
+    r[field]=sel.value;
+    if (field === 'contentType' || field === 'replyStatus') r._autoAnalyzed = 'false';
+    saveEdit(uuid,field,sel.value);
+    showToast('已更新: '+field+' → '+sel.value);
+    applyFilters();
+  }
+}
+
+function toggleSelect(cb) {
+  var uuid = cb.dataset.uuid;
+  if (cb.checked) selectedIds.add(uuid); else selectedIds.delete(uuid);
+  updateBatchBar();
+}
+function toggleSelectAll() {
+  var checked = document.getElementById('selectAll').checked;
+  var start = (currentPage-1)*PAGE_SIZE;
+  filtered.slice(start,start+PAGE_SIZE).forEach(function(r){if(checked)selectedIds.add(r.uuid);else selectedIds.delete(r.uuid);});
+  renderTable();
+}
+function clearSelection() { selectedIds.clear(); renderTable(); }
+function updateBatchBar() {
+  document.getElementById('batchCount').textContent = selectedIds.size;
+  document.getElementById('batchBar').classList.toggle('hidden', selectedIds.size===0);
+}
+function batchUpdate() {
+  var status = document.getElementById('batchReplyStatus').value;
+  if (!status) return;
+  var count = 0;
+  selectedIds.forEach(function(uuid){
+    var r = records.find(function(x){return x.uuid===uuid;});
+    if (r) { r.replyStatus=status; saveEdit(uuid,'replyStatus',status); count++; }
+  });
+  showToast('批量更新 '+count+' 条');
+  selectedIds.clear();
+  applyFilters();
+}
+
+// ======= HOT DETECTION =======
+function renderHotDetection() {
+  if (records.length === 0) {
+    var ids = ['hotThresholdLikes','hotThresholdScore','hotCountLikes','hotCountScore','hotCountRank','hotNoteCount'];
+    ids.forEach(function(id){ document.getElementById(id).textContent = '-'; });
+    document.getElementById('noteTopList').innerHTML =
+      '<div class="col-span-full text-center py-12 text-gray-400">'
+      + '<span class="text-2xl">📊</span>'
+      + '<p class="mt-2">暂无数据，请先导入评论</p></div>';
+    return;
+  }
+  var likesSorted = records.map(function(r){return r.likes||0}).filter(function(v){return v>0}).sort(function(a,b){return a-b});
+  var scoresSorted = records.map(function(r){return r.hotScore||0}).filter(function(v){return v>0}).sort(function(a,b){return a-b});
+  var p90l = likesSorted[Math.floor(likesSorted.length*0.9)]||0;
+  var p90s = scoresSorted[Math.floor(scoresSorted.length*0.9)]||0;
+
+  document.getElementById('hotThresholdLikes').textContent = p90l;
+  document.getElementById('hotThresholdScore').textContent = p90s.toFixed(2);
+  document.getElementById('hotCountLikes').textContent = records.filter(function(r){return (r.likes||0)>=p90l}).length;
+  document.getElementById('hotCountScore').textContent = records.filter(function(r){return (r.hotScore||0)>=p90s}).length;
+
+  var noteGroups = {};
+  records.forEach(function(r) {
+    var nid = r.noteSerial || r.noteIndex;
+    if (!noteGroups[nid]) noteGroups[nid] = [];
+    noteGroups[nid].push(r);
+  });
+  var rankTop3 = 0, noteCount = 0;
+  var noteListHtml = '';
+  Object.keys(noteGroups).sort(function(a,b){return noteGroups[b].length-noteGroups[a].length}).slice(0,18).forEach(function(nid) {
+    var recs = noteGroups[nid];
+    var top3 = recs.sort(function(a,b){return (b.hotScore||0)-(a.hotScore||0)}).slice(0,3);
+    rankTop3 += top3.length; noteCount++;
+    noteListHtml += '<div class="border rounded-lg p-3"><div class="flex justify-between items-center mb-2">'
+      +'<span class="font-semibold text-sm">#'+nid+' '+(recs[0].noteContent||'').substring(0,20)+'</span>'
+      +'<span class="text-xs text-gray-400">'+recs.length+'条</span></div><div class="space-y-1">';
+    top3.forEach(function(r,i) {
+      noteListHtml += '<div class="flex items-center gap-2 text-xs p-1 rounded '+(i===0?'bg-amber-50':'bg-gray-50')+'">'
+        +'<span class="font-bold '+(i===0?'text-amber-600':'text-gray-400')+'">#'+(i+1)+'</span>'
+        +'<span class="flex-1 truncate">'+esc((r.commentContent||'').substring(0,40))+'</span>'
+        +'<span class="text-gray-400">👍'+(r.likes||0)+'</span>'
+        +'<span class="text-gray-400">🔥'+(r.hotScore?r.hotScore.toFixed(0):'-')+'</span></div>';
+    });
+    noteListHtml += '</div></div>';
+  });
+  document.getElementById('noteTopList').innerHTML = noteListHtml;
+  document.getElementById('hotCountRank').textContent = rankTop3;
+  document.getElementById('hotNoteCount').textContent = noteCount;
+
+  // Distribution charts
+  var lb = {}, sb = {};
+  var lThresholds = [0,1,2,3,5,10,20,50,100,200,500,1000];
+  var sThresholds = [0,2,5,10,20,30,40,50,60,80,100];
+  lThresholds.forEach(function(v,i){if(i<lThresholds.length-1)lb[v+'-'+lThresholds[i+1]]=0;});
+  lb['1000+']=0;
+  records.forEach(function(r){var l=r.likes||0;for(var i=0;i<lThresholds.length-1;i++){if(l>=lThresholds[i]&&l<lThresholds[i+1]){lb[lThresholds[i]+'-'+lThresholds[i+1]]++;return;}}lb['1000+']++;});
+  makeChart('chartLikesDist','bar',{labels:Object.keys(lb),datasets:[{data:Object.values(lb),backgroundColor:'#3b82f6'}]},{plugins:{legend:{display:false}},scales:{y:{beginAtZero:true}}});
+
+  sThresholds.forEach(function(v,i){if(i<sThresholds.length-1)sb[v+'-'+sThresholds[i+1]]=0;});
+  sb['100+']=0;
+  records.forEach(function(r){var s=r.hotScore||0;for(var i=0;i<sThresholds.length-1;i++){if(s>=sThresholds[i]&&s<sThresholds[i+1]){sb[sThresholds[i]+'-'+sThresholds[i+1]]++;return;}}sb['100+']++;});
+  makeChart('chartScoreDist','bar',{labels:Object.keys(sb),datasets:[{data:Object.values(sb),backgroundColor:'#f59e0b'}]},{plugins:{legend:{display:false}},scales:{y:{beginAtZero:true}}});
+}
+
+function recalcHot() {
+  var likesSorted = records.map(function(r){return r.likes||0}).filter(function(v){return v>0}).sort(function(a,b){return a-b});
+  var scoresSorted = records.map(function(r){return r.hotScore||0}).filter(function(v){return v>0}).sort(function(a,b){return a-b});
+  var p90l = likesSorted[Math.floor(likesSorted.length*0.9)]||0;
+  var p90s = scoresSorted[Math.floor(scoresSorted.length*0.9)]||0;
+
+  var noteGroups = {};
+  records.forEach(function(r){var nid=r.noteSerial||r.noteIndex;if(!noteGroups[nid])noteGroups[nid]=[];noteGroups[nid].push(r);});
+
+  var updated = 0;
+  records.forEach(function(r) {
+    var reasons = [];
+    if ((r.likes||0) >= p90l) reasons.push('点赞数进入全局前10%');
+    if ((r.hotScore||0) >= p90s) reasons.push('热度分进入全局前10%');
+    var nid = r.noteSerial || r.noteIndex;
+    var noteRecs = noteGroups[nid] || [];
+    var sorted = noteRecs.slice().sort(function(a,b){return (b.hotScore||0)-(a.hotScore||0)});
+    var top3 = sorted.slice(0,3);
+    if (top3.find(function(t){return t.uuid===r.uuid})) reasons.push('笔记内热度排名前3');
+    var wasHot = r.isHot;
+    r.isHot = reasons.length > 0 ? 'true' : 'false';
+    r.hotReason = reasons.join(', ');
+    if (wasHot !== r.isHot) updated++;
+    saveEdit(r.uuid, 'isHot', r.isHot);
+  });
+  showToast('热评重算完成！更新了 '+updated+' 条');
+  applyFilters();
+  renderDashboard();
+  renderHotDetection();
+}
+
+// ======= CHECKLIST =======
+function initChecklist() {
+  var sopItems = SOP_CHECKLIST.daily;
+  var checks = JSON.parse(localStorage.getItem('hcOps_sop_checks')||'{}');
+  // Also read old format for backwards compatibility
+  var oldChecks = JSON.parse(localStorage.getItem('hcOps_checklist')||'{}');
+  var div = document.getElementById('dailyChecklist');
+  div.innerHTML = sopItems.map(function(item) {
+    var checked = checks[item.id] || oldChecks[item.id.charAt(1)-1] || false;
+    var done = checked ? 'done' : '';
+    var chk = checked ? 'checked' : '';
+    return '<div class="checklist-item flex items-center gap-2 '+done+'">'
+      +'<input type="checkbox" '+chk+' onchange="toggleSOPCheck(\''+item.id+'\')" class="w-4 h-4 rounded">'
+      +'<span class="check-text text-sm">'+item.text+'</span></div>';
+  }).join('');
+}
+
+// ======= IMPORT / EXPORT =======
+function handleImport(e) {
+  var file = e.target.files[0];
+  if (!file) return;
+  var reader = new FileReader();
+  reader.onload = function(ev) {
+    try {
+      var data = JSON.parse(ev.target.result);
+      records = Array.isArray(data) ? data : (data.records || []);
+      var autoCount = 0;
+      records.forEach(function(r) {
+        if (!r.contentType || !r.replyStatus) {
+          var analysis = analyzeComment(r.commentContent || '');
+          if (!r.contentType) r.contentType = analysis.contentType;
+          if (!r.replyStatus) r.replyStatus = analysis.replyStatus;
+          r._autoAnalyzed = 'true';
+          r._analyzeConfidence = analysis.confidence;
+          autoCount++;
+        }
+      });
+      localStorage.setItem('hcOps_data', JSON.stringify(records));
+      localStorage.removeItem('hcOps_edits');
+      var toastMsg = '成功导入 '+records.length+' 条';
+      if (autoCount > 0) toastMsg += '，自动分类 ' + autoCount + ' 条';
+      showToast(toastMsg);
+      applyFilters(); renderDashboard(); renderHotDetection();
+    } catch(err) { alert('JSON解析错误: '+err.message); }
+  };
+  reader.readAsText(file);
+}
+
+function handleImportFallback(input) {
+  var file = input.files[0];
+  if (!file) return;
+  var reader = new FileReader();
+  reader.onload = function(ev) {
+    try {
+      var data = JSON.parse(ev.target.result);
+      records = Array.isArray(data) ? data : (data.records || []);
+      var autoCount = 0;
+      records.forEach(function(r) {
+        if (!r.contentType || !r.replyStatus) {
+          var analysis = analyzeComment(r.commentContent || '');
+          if (!r.contentType) r.contentType = analysis.contentType;
+          if (!r.replyStatus) r.replyStatus = analysis.replyStatus;
+          r._autoAnalyzed = 'true';
+          r._analyzeConfidence = analysis.confidence;
+          autoCount++;
+        }
+      });
+      localStorage.setItem('hcOps_data', JSON.stringify(records));
+      localStorage.removeItem('hcOps_edits');
+      var overlay = input.closest('div[style]');
+      if (overlay) overlay.remove();
+      var toastMsg = '成功导入 '+records.length+' 条';
+      if (autoCount > 0) toastMsg += '，自动分类 ' + autoCount + ' 条';
+      showToast(toastMsg);
+      init();
+    } catch(err) { alert('JSON解析错误: '+err.message); }
+  };
+  reader.readAsText(file);
+}
+
+function exportCSVDaily() {
+  var today = new Date().toISOString().slice(0,10);
+  var hc = records.filter(function(r){return r.isHot==='true'}).length;
+  var nc = records.length;
+  var mr = records.filter(function(r){return r.replyStatus==='必须回复'});
+  var dc = records.filter(function(r){return r.replyStatus==='建议删除'}).length;
+  var top5 = records.slice().sort(function(a,b){return (b.likes||0)-(a.likes||0)}).slice(0,5);
+  var md = '## 评论区运营日报 '+today+'\n\n';
+  md += '| 指标 | 数值 |\n|------|------|\n';
+  md += '| 总评论数 | '+nc+' |\n';
+  md += '| 热评数/率 | '+hc+' / '+(hc/nc*100).toFixed(1)+'% |\n';
+  md += '| 必须回复 | '+mr.length+' |\n';
+  md += '| 建议删除 | '+dc+' |\n\n';
+  md += '### 必须回复列表\n\n';
+  mr.forEach(function(r){md += '- **'+(r.commentAuthor||'匿名')+'**: '+(r.commentContent||'').substring(0,80)+'\n';});
+  md += '\n### TOP5热评\n\n';
+  top5.forEach(function(r,i){md += (i+1)+'. 👍'+(r.likes||0)+' 🔥'+(r.hotScore?r.hotScore.toFixed(1):'-')+' '+(r.commentContent||'').substring(0,60)+'\n';});
+  navigator.clipboard.writeText(md).then(function(){showToast('日报已复制到剪贴板')}).catch(function(){
+    var ta=document.createElement('textarea');ta.value=md;document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);showToast('日报已复制');
+  });
+}
+
+function showToast(msg) {
+  var t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(function(){t.classList.remove('show');}, 2500);
+}
+
+// ======= RESET DATA =======
+function confirmReset() {
+  document.getElementById('resetModal').classList.remove('hidden');
+}
+function closeResetModal() {
+  document.getElementById('resetModal').classList.add('hidden');
+}
+function doReset() {
+  records = [];
+  filtered = [];
+  selectedIds.clear();
+  localStorage.removeItem('hcOps_data');
+  localStorage.removeItem('hcOps_edits');
+  localStorage.removeItem('hcOps_checklist');
+  localStorage.removeItem('hcOps_sop_checks');
+  closeResetModal();
+  init();
+  showToast('数据已重置，请重新导入');
+}
+
+// ======= TAB SWITCH HELPER =======
+function switchTabByName(tabName) {
+  var tabMap = { dashboard: 0, list: 1, hot: 2, sop: 3 };
+  var idx = tabMap[tabName];
+  var btns = document.querySelectorAll('.tab-btn');
+  if (btns[idx]) switchTab(tabName, btns[idx]);
+}
+
+// ======= PASTE IMPORT =======
+var COLUMN_ALIASES = {
+  'uuid': ['uuid','UUID','id','ID'],
+  'noteSerial': ['笔记序号','笔记编号','noteSerial'],
+  'noteContent': ['笔记文本内容','笔记内容','笔记正文','noteContent','笔记'],
+  'noteLink': ['原笔记链接','笔记链接','noteLink','链接'],
+  'commentContent': ['评论内容','评论文本','commentContent','评论'],
+  'commentAuthor': ['评论人','评论者','commentAuthor','用户名'],
+  'commentee': ['被评论人','被回复人','commentee','回复对象'],
+  'commentType': ['评论类型','主子类型','commentType'],
+  'contentType': ['评论内容类型','内容类型','contentType','内容分类'],
+  'role': ['评论顺序角色','角色','role','评论角色','顺序角色'],
+  'replyStatus': ['回复处理状态','回复状态','replyStatus','处理状态'],
+  'isHot': ['是否热评','热评','isHot'],
+  'hotReason': ['热评原因','hotReason','热门原因'],
+  'likes': ['点赞数','赞数','likes','点赞'],
+  'subComments': ['子评论数','回复数','subComments','子评论'],
+  'hotScore': ['热度分','热度','hotScore','热度评分'],
+  'noteRank': ['笔记内热度排名','热度排名','noteRank','笔记排名'],
+  'region': ['地区','IP属地','region','省份'],
+  'publishTime': ['发布时间','时间','publishTime','日期'],
+  'remarks': ['备注','运营备注','remarks','说明']
+};
+
+var pendingPastedRecords = [];
+var pendingPastedHeaders = [];
+
+function openPasteImport() {
+  document.getElementById('pasteImportModal').classList.remove('hidden');
+  document.getElementById('pasteInput').value = '';
+  document.getElementById('pasteMappingPreview').classList.add('hidden');
+  pendingPastedRecords = [];
+  pendingPastedHeaders = [];
+}
+function closePasteImport() {
+  document.getElementById('pasteImportModal').classList.add('hidden');
+}
+
+function mapColumn(header) {
+  var h = header.trim();
+  for (var field in COLUMN_ALIASES) {
+    for (var i = 0; i < COLUMN_ALIASES[field].length; i++) {
+      if (h.toLowerCase() === COLUMN_ALIASES[field][i].toLowerCase()) return field;
+    }
+  }
+  return null;
+}
+
+function parsePastedData() {
+  var raw = document.getElementById('pasteInput').value.trim();
+  if (!raw) { showToast('请先粘贴数据'); return; }
+
+  // Auto-detect delimiter
+  var firstLine = raw.split('\n')[0];
+  var tabCount = (firstLine.match(/\t/g)||[]).length;
+  var commaCount = (firstLine.match(/,/g)||[]).length;
+  var delimiter = tabCount > 0 ? '\t' : ',';
+
+  var lines = raw.split('\n').map(function(l){return l.split(delimiter).map(function(c){return c.trim().replace(/^"|"$/g,'');});});
+  // Filter out blank rows
+  lines = lines.filter(function(row){return row.some(function(cell){return cell !== '';});});
+  if (lines.length < 2) { showToast('数据不足，需要至少标题行+1行数据'); return; }
+
+  var headers = lines[0];
+  var mappedFields = headers.map(function(h){return mapColumn(h);});
+
+  var records = [];
+  for (var i = 1; i < lines.length; i++) {
+    var row = lines[i];
+    var obj = {};
+    for (var j = 0; j < headers.length; j++) {
+      if (j < row.length && mappedFields[j]) {
+        var val = row[j];
+        // Try to convert numeric fields
+        if (['likes','subComments','noteRank','noteSerial','hotScore'].indexOf(mappedFields[j]) >= 0) {
+          var num = parseFloat(val);
+          if (!isNaN(num)) val = num;
+        }
+        if (mappedFields[j] === 'isHot') val = (val === 'true' || val === '是' || val === '1') ? 'true' : 'false';
+        if (mappedFields[j] === 'publishTime' && val) {
+          var ts = Date.parse(val);
+          if (!isNaN(ts)) val = ts;
+        }
+        obj[mappedFields[j]] = val;
+      }
+    }
+    if (Object.keys(obj).length > 0) {
+      if (!obj.uuid) obj.uuid = 'imp_' + Date.now() + '_' + i;
+      records.push(obj);
+    }
+  }
+
+  pendingPastedRecords = records;
+  pendingPastedHeaders = headers;
+
+  // Render mapping preview
+  var mappingHtml = '<table class="w-full border-collapse"><thead><tr class="bg-gray-100"><th class="px-2 py-1 text-left border">源列名</th><th class="px-2 py-1 text-left border">映射字段</th></tr></thead><tbody>';
+  var allFields = Object.keys(COLUMN_ALIASES);
+  headers.forEach(function(h, idx) {
+    var mapped = mappedFields[idx] || '';
+    mappingHtml += '<tr class="mapping-row"><td class="px-2 py-1 border text-gray-700">' + esc(h) + '</td><td class="px-2 py-1 border">';
+    mappingHtml += '<select class="edit-select" data-col-idx="'+idx+'" onchange="updatePastedMapping(this,'+idx+')">';
+    mappingHtml += '<option value="">-- 跳过 --</option>';
+    allFields.forEach(function(f) {
+      var sel = (mapped === f) ? ' selected' : '';
+      mappingHtml += '<option value="'+f+'"'+sel+'>'+f+'</option>';
+    });
+    mappingHtml += '</select></td></tr>';
+  });
+  mappingHtml += '</tbody></table>';
+  document.getElementById('mappingTable').innerHTML = mappingHtml;
+
+  // Render data preview (first 5 records)
+  var previewHtml = '<table class="w-full border-collapse text-xs"><thead><tr class="bg-gray-100">';
+  var previewFields = ['commentContent','commentAuthor','contentType','role','replyStatus','likes','hotScore','region'];
+  previewFields.forEach(function(f){ previewHtml += '<th class="px-2 py-1 border">'+f+'</th>'; });
+  previewHtml += '</tr></thead><tbody>';
+  records.slice(0,5).forEach(function(r) {
+    previewHtml += '<tr>';
+    previewFields.forEach(function(f){ previewHtml += '<td class="px-2 py-1 border truncate max-w-[120px]">'+esc(String(r[f]||'-')).substring(0,30)+'</td>'; });
+    previewHtml += '</tr>';
+  });
+  previewHtml += '</tbody></table>';
+  document.getElementById('dataPreview').innerHTML = previewHtml;
+  document.getElementById('parsedCount').textContent = '共解析 ' + records.length + ' 条数据';
+
+  document.getElementById('pasteMappingPreview').classList.remove('hidden');
+}
+
+function updatePastedMapping(sel, colIdx) {
+  var newField = sel.value;
+  // Re-parse with updated mapping
+  var headers = pendingPastedHeaders;
+  var raw = document.getElementById('pasteInput').value.trim();
+  var firstLine = raw.split('\n')[0];
+  var tabCount = (firstLine.match(/\t/g)||[]).length;
+  var delimiter = tabCount > 0 ? '\t' : ',';
+  var lines = raw.split('\n').map(function(l){return l.split(delimiter).map(function(c){return c.trim().replace(/^"|"$/g,'');});});
+  lines = lines.filter(function(row){return row.some(function(cell){return cell !== '';});});
+
+  // Rebuild mappedFields from current dropdowns
+  var mappedFields = [];
+  var selects = document.querySelectorAll('#mappingTable select');
+  selects.forEach(function(s, idx) {
+    mappedFields.push(s.value || null);
+  });
+
+  var records = [];
+  for (var i = 1; i < lines.length; i++) {
+    var row = lines[i];
+    var obj = {};
+    for (var j = 0; j < headers.length; j++) {
+      if (j < row.length && mappedFields[j]) {
+        var val = row[j];
+        if (['likes','subComments','noteRank','noteSerial','hotScore'].indexOf(mappedFields[j]) >= 0) {
+          var num = parseFloat(val); if (!isNaN(num)) val = num;
+        }
+        if (mappedFields[j] === 'isHot') val = (val === 'true' || val === '是' || val === '1') ? 'true' : 'false';
+        if (mappedFields[j] === 'publishTime' && val) { var ts = Date.parse(val); if (!isNaN(ts)) val = ts; }
+        obj[mappedFields[j]] = val;
+      }
+    }
+    if (Object.keys(obj).length > 0) {
+      if (!obj.uuid) obj.uuid = 'imp_' + Date.now() + '_' + i;
+      records.push(obj);
+    }
+  }
+  pendingPastedRecords = records;
+  document.getElementById('parsedCount').textContent = '共解析 ' + records.length + ' 条数据';
+}
+
+function confirmPasteImport() {
+  if (pendingPastedRecords.length === 0) { showToast('没有数据可导入'); return; }
+  records = pendingPastedRecords;
+  var autoCount = 0;
+  records.forEach(function(r) {
+    if (!r.contentType || !r.replyStatus) {
+      var analysis = analyzeComment(r.commentContent || '');
+      if (!r.contentType) r.contentType = analysis.contentType;
+      if (!r.replyStatus) r.replyStatus = analysis.replyStatus;
+      r._autoAnalyzed = 'true';
+      r._analyzeConfidence = analysis.confidence;
+      autoCount++;
+    }
+  });
+  localStorage.setItem('hcOps_data', JSON.stringify(records));
+  localStorage.removeItem('hcOps_edits');
+  closePasteImport();
+  init();
+  var toastMsg = '成功导入 ' + records.length + ' 条数据';
+  if (autoCount > 0) toastMsg += '，自动分类 ' + autoCount + ' 条';
+  showToast(toastMsg);
+}
+
+// ======= SMART ANALYSIS =======
+function analyzeComment(text) {
+  var t = (text || '').trim();
+  var result = { contentType: '', replyStatus: '', confidence: 'low' };
+  if (!t) {
+    result.contentType = '询问类';
+    result.replyStatus = '选择性回复';
+    return result;
+  }
+  // Spam detection (takes priority)
+  var spamKeywords = ['广告', '扫码', '付费', '收费', '骗', '垃圾', '骗子', '假'];
+  var isSpam = spamKeywords.some(function(kw) { return t.indexOf(kw) >= 0; });
+  if (isSpam) {
+    result.contentType = '吸引点击类';
+    result.replyStatus = '建议删除';
+    result.confidence = 'high';
+    return result;
+  }
+  // Content type keyword matching (inquiry > feedback > clickbait priority)
+  var inquiryKW = ['?', '？', '怎么', '如何', '能不能', '可以吗', '多少钱', '价格',
+    '效果怎么样', '真的吗', '靠谱吗', '有用吗', '会', '能', '求',
+    '推荐', '哪个', '哪里', '怎样', '啥', '什么', '能否', '需要', '行不行'];
+  var feedbackKW = ['用了', '好用', '有效', '降了', '过了', '通过', '查重', '降重',
+    '结果', '效果', '试试', '成功', '不错', '挺好', '很好', '满意',
+    '省了', '快', '方便', '稳', '牛', '厉害', '给力', '棒'];
+  var clickbaitKW = ['快来', '看看', '点击', '私信', '戳', '加微信', '加V', '联系方式'];
+
+  var hitInq = inquiryKW.some(function(kw) { return t.indexOf(kw) >= 0; });
+  var hitFb = feedbackKW.some(function(kw) { return t.indexOf(kw) >= 0; });
+  var hitCb = clickbaitKW.some(function(kw) { return t.indexOf(kw) >= 0; });
+
+  if (hitInq) {
+    result.contentType = '询问类';
+    result.replyStatus = '必须回复';
+    result.confidence = 'high';
+  } else if (hitFb) {
+    result.contentType = '效果反馈类';
+    result.replyStatus = '选择性回复';
+    result.confidence = 'high';
+  } else if (hitCb) {
+    result.contentType = '吸引点击类';
+    result.replyStatus = '无需回复';
+    result.confidence = 'high';
+  } else {
+    result.contentType = '询问类';
+    result.replyStatus = '选择性回复';
+    result.confidence = 'low';
+  }
+  return result;
+}
+
+function analyzeAll() {
+  if (records.length === 0) { showToast('暂无数据可分析'); return; }
+  var count = 0;
+  records.forEach(function(r) {
+    if (r._autoAnalyzed === 'true' || !r.contentType || !r.replyStatus) {
+      var analysis = analyzeComment(r.commentContent || '');
+      r.contentType = analysis.contentType;
+      r.replyStatus = analysis.replyStatus;
+      r._autoAnalyzed = 'true';
+      r._analyzeConfidence = analysis.confidence;
+      count++;
+    }
+  });
+  localStorage.setItem('hcOps_data', JSON.stringify(records));
+  showToast('智能分析完成！更新了 ' + count + ' 条记录');
+  if (count > 0) { applyFilters(); renderDashboard(); }
+}
+
+// ======= QUICK ENTRY =======
+function openQuickEntry() {
+  document.getElementById('quickEntryModal').classList.remove('hidden');
+  document.getElementById('quickEntryInput').value = '';
+  document.getElementById('quickEntryPreview').classList.add('hidden');
+  pendingQuickRecords = [];
+}
+function closeQuickEntry() {
+  document.getElementById('quickEntryModal').classList.add('hidden');
+}
+function parseQuickEntryLine(line) {
+  var trimmed = line.trim();
+  if (!trimmed) return null;
+  var author = '匿名';
+  var content = trimmed;
+  var likes = 0;
+  // Try colon-separated: "author: content" or "author：content"
+  var colonMatch = trimmed.match(/^(.+?)[：:]\s*(.+)/);
+  if (colonMatch) {
+    author = colonMatch[1].trim();
+    content = colonMatch[2].trim();
+  } else {
+    // Try space-separated: first word is author (short name heuristic)
+    var parts = trimmed.split(/\s+/);
+    if (parts.length >= 2 && parts[0].length <= 20) {
+      author = parts[0];
+      content = parts.slice(1).join(' ');
+    }
+  }
+  // Extract likes from content suffix: "👍12", "👍 12", "赞12"
+  var likesMatch = content.match(/[👍赞]\s*(\d+)\s*$/);
+  if (likesMatch) {
+    likes = parseInt(likesMatch[1], 10) || 0;
+    content = content.replace(/[👍赞]\s*\d+\s*$/, '').trim();
+  }
+  var analysis = analyzeComment(content);
+  return {
+    uuid: 'qe_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6),
+    noteIndex: '', noteContent: '', noteLink: '',
+    commentContent: content, commentAuthor: author, commentee: '',
+    commentType: '主评论', contentType: analysis.contentType, role: '普通评论',
+    replyStatus: analysis.replyStatus, isHot: 'false', hotReason: '',
+    likes: likes, subComments: 0, hotScore: 0,
+    noteRank: '', noteSerial: '', region: '',
+    publishTime: Date.now(), remarks: '',
+    _autoAnalyzed: 'true', _analyzeConfidence: analysis.confidence
+  };
+}
+function parseQuickEntry() {
+  var raw = document.getElementById('quickEntryInput').value.trim();
+  if (!raw) { showToast('请先粘贴评论内容'); return; }
+  var lines = raw.split('\n');
+  pendingQuickRecords = [];
+  for (var i = 0; i < lines.length; i++) {
+    var rec = parseQuickEntryLine(lines[i]);
+    if (rec) pendingQuickRecords.push(rec);
+  }
+  if (pendingQuickRecords.length === 0) { showToast('未解析到有效评论内容'); return; }
+  document.getElementById('quickEntryCount').textContent = pendingQuickRecords.length;
+  var tbody = document.getElementById('quickEntryTableBody');
+  var html = '';
+  pendingQuickRecords.forEach(function(r, idx) {
+    var contentDisplay = esc((r.commentContent || '').substring(0, 50));
+    if ((r.commentContent || '').length > 50) contentDisplay += '...';
+    html += '<tr class="hover:bg-gray-50">'
+      + '<td class="px-2 py-1 border text-gray-400">' + (idx + 1) + '</td>'
+      + '<td class="px-2 py-1 border">' + esc(r.commentAuthor || '-') + '</td>'
+      + '<td class="px-2 py-1 border">' + contentDisplay
+        + (r._autoAnalyzed === 'true' ? ' <span class="badge" style="background:#e8f5e9;color:#2e7d32;font-size:10px">自动</span>' : '')
+        + '</td>'
+      + '<td class="px-2 py-1 border text-center">' + (r.likes || 0) + '</td>'
+      + '<td class="px-2 py-1 border"><select class="edit-select text-xs" onchange="updateQuickEntryField(' + idx + ',\'contentType\',this.value)">'
+        + '<option value="询问类"' + (r.contentType === '询问类' ? ' selected' : '') + '>询问类</option>'
+        + '<option value="吸引点击类"' + (r.contentType === '吸引点击类' ? ' selected' : '') + '>吸引点击类</option>'
+        + '<option value="效果反馈类"' + (r.contentType === '效果反馈类' ? ' selected' : '') + '>效果反馈类</option>'
+      + '</select></td>'
+      + '<td class="px-2 py-1 border"><select class="edit-select text-xs" onchange="updateQuickEntryField(' + idx + ',\'replyStatus\',this.value)">'
+        + '<option value="选择性回复"' + (r.replyStatus === '选择性回复' ? ' selected' : '') + '>选择性</option>'
+        + '<option value="必须回复"' + (r.replyStatus === '必须回复' ? ' selected' : '') + '>必须回复</option>'
+        + '<option value="无需回复"' + (r.replyStatus === '无需回复' ? ' selected' : '') + '>无需回复</option>'
+        + '<option value="建议删除"' + (r.replyStatus === '建议删除' ? ' selected' : '') + '>建议删除</option>'
+      + '</select></td>'
+      + '</tr>';
+  });
+  tbody.innerHTML = html;
+  document.getElementById('quickEntryPreview').classList.remove('hidden');
+}
+function updateQuickEntryField(idx, field, value) {
+  if (pendingQuickRecords[idx]) pendingQuickRecords[idx][field] = value;
+}
+function confirmQuickEntry() {
+  if (pendingQuickRecords.length === 0) { showToast('没有数据可导入'); return; }
+  for (var i = 0; i < pendingQuickRecords.length; i++) { records.push(pendingQuickRecords[i]); }
+  localStorage.setItem('hcOps_data', JSON.stringify(records));
+  closeQuickEntry();
+  showToast('成功追加 ' + pendingQuickRecords.length + ' 条记录');
+  applyFilters();
+  renderDashboard();
+}
+
+// ======= SOP EXECUTION =======
+var SOP_CHECKLIST = {
+  daily: [
+    { id:'d1', text:'检查所有「必须回复」标记的评论是否24h内已回复', action:'filter', filterField:'filterReplyStatus', filterValue:'必须回复', actionLabel:'查看必须回复' },
+    { id:'d2', text:'扫描新增评论，完成内容类型、角色、回复状态打标', action:'navigate', tab:'list', actionLabel:'打开评论列表' },
+    { id:'d3', text:'处理「建议删除」标记的评论', action:'filter', filterField:'filterReplyStatus', filterValue:'建议删除', actionLabel:'查看建议删除' },
+    { id:'d4', text:'更新热评数据的点赞数、子评论数', action:'navigate', tab:'hot', actionLabel:'打开热评识别' }
+  ],
+  weekly: [
+    { id:'w1', text:'刷新全局热评阈值（前10%临界值）', action:'function', fn:'recalcHot', actionLabel:'执行重算' },
+    { id:'w2', text:'刷新各笔记内热度排名', action:'function', fn:'recalcHot', actionLabel:'执行重算' },
+    { id:'w3', text:'更新热评标记和热评原因', action:'function', fn:'recalcHot', actionLabel:'执行重算' },
+    { id:'w4', text:'提取TOP10热评话术', action:'sort', sortBy:'likes-desc', actionLabel:'查看TOP10' },
+    { id:'w5', text:'输出周报', action:'function', fn:'exportCSVDaily', actionLabel:'生成周报' }
+  ],
+  monthly: [
+    { id:'m1', text:'月度数据分析报告', action:'navigate', tab:'dashboard', actionLabel:'查看仪表盘' },
+    { id:'m2', text:'话术模板库版本迭代', action:'none', actionLabel:'' },
+    { id:'m3', text:'竞品评论区策略扫描', action:'none', actionLabel:'' },
+    { id:'m4', text:'飞书表格清理与字段优化', action:'none', actionLabel:'' }
+  ]
+};
+
+var sopSections = { daily: true, weekly: true, monthly: true };
+
+function renderSOPChecklist() {
+  ['daily','weekly','monthly'].forEach(function(group) {
+    var items = SOP_CHECKLIST[group];
+    var checks = JSON.parse(localStorage.getItem('hcOps_sop_checks') || '{}');
+    var container = document.getElementById('sop' + group.charAt(0).toUpperCase() + group.slice(1));
+    if (!container) return;
+
+    var checkedCount = 0;
+    var html = '';
+    items.forEach(function(item) {
+      var checked = checks[item.id] || false;
+      if (checked) checkedCount++;
+      var borderColor = checked ? 'border-green-400 bg-green-50' : 'border-gray-200 bg-white';
+      var actionHtml = '';
+      if (item.actionLabel) {
+        actionHtml = '<button onclick="executeSOPAction(\''+item.id+'\')" class="sop-action-btn ml-2 bg-blue-50 text-blue-600 hover:bg-blue-100">'+item.actionLabel+' →</button>';
+      }
+      html += '<div class="sop-item flex items-center gap-3 p-3 rounded-lg border-l-4 '+borderColor+(checked?' checked':'')+'">'
+        +'<input type="checkbox" '+(checked?'checked':'')+' onchange="toggleSOPCheck(\''+item.id+'\')" class="w-5 h-5 rounded cursor-pointer flex-shrink-0">'
+        +'<span class="sop-text flex-1 text-sm">'+item.text+'</span>'
+        +actionHtml
+        +'</div>';
+    });
+
+    if (!sopSections[group]) {
+      container.classList.add('hidden');
+    } else {
+      container.classList.remove('hidden');
+    }
+    container.innerHTML = html;
+
+    // Update progress
+    var total = items.length;
+    document.getElementById(group + 'Progress').textContent = checkedCount + '/' + total;
+    document.getElementById(group + 'ProgressBar').style.width = (total > 0 ? (checkedCount/total*100) : 0) + '%';
+  });
+}
+
+function toggleSOPCheck(itemId) {
+  var checks = JSON.parse(localStorage.getItem('hcOps_sop_checks') || '{}');
+  checks[itemId] = !checks[itemId];
+  localStorage.setItem('hcOps_sop_checks', JSON.stringify(checks));
+  renderSOPChecklist();
+  // Also refresh dashboard checklist
+  initChecklist();
+}
+
+function executeSOPAction(itemId) {
+  // Find the item
+  var item = null;
+  ['daily','weekly','monthly'].forEach(function(group) {
+    SOP_CHECKLIST[group].forEach(function(i) { if (i.id === itemId) item = i; });
+  });
+  if (!item) return;
+
+  switch(item.action) {
+    case 'filter':
+      switchTabByName('list');
+      setTimeout(function() {
+        resetFilters();
+        document.getElementById(item.filterField).value = item.filterValue;
+        applyFilters();
+      }, 100);
+      break;
+    case 'navigate':
+      switchTabByName(item.tab);
+      break;
+    case 'function':
+      if (window[item.fn]) window[item.fn]();
+      break;
+    case 'sort':
+      switchTabByName('list');
+      setTimeout(function() {
+        document.getElementById('sortBy').value = item.sortBy;
+        applyFilters();
+      }, 100);
+      break;
+    case 'none':
+      break;
+  }
+}
+
+function toggleSection(section) {
+  sopSections[section] = !sopSections[section];
+  var chevron = document.getElementById(section + 'Chevron');
+  chevron.textContent = sopSections[section] ? '▼' : '▲';
+  renderSOPChecklist();
+}
+</script>
+</body>
+</html>
